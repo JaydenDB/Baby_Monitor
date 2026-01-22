@@ -49,8 +49,8 @@ The system is designed to work reliably even when MediaPipe struggles with baby 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/baby-monitor.git
-   cd baby-monitor
+   git clone https://github.com/JaydenDB/Baby_Monitor.git
+   cd Baby_Monitor
    ```
 
 2. Run the setup script:
@@ -236,7 +236,7 @@ Log levels:
 To update the program:
 
 ```bash
-cd baby-monitor
+cd Baby_Monitor
 git pull
 pip3 install -r requirements.txt
 sudo systemctl restart baby-monitor.service
@@ -263,6 +263,6 @@ For issues or questions:
 This program is designed to be deployed via GitHub:
 
 1. Push code to GitHub repository
-2. Clone on Raspberry Pi: `git clone <repository-url>`
+2. Clone on Raspberry Pi: `git clone https://github.com/JaydenDB/Baby_Monitor.git`
 3. Follow setup instructions above
 4. Update with: `git pull` when needed
