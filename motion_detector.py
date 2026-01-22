@@ -14,12 +14,18 @@ class MotionDetector:
     """Detects baby position using motion and contour analysis"""
     
     def __init__(self):
+        # Reduced history from 500 to 100 to save memory on Raspberry Pi
+        # 100 frames is sufficient for background learning while using ~80% less memory
         self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=50, detectShadows=True
+            history=100, varThreshold=50, detectShadows=True
         )
         self.frame_count = 0
         self.background_learning_frames = 30  # Learn background for first N frames
         self.last_position = None
+        # Track brightness for lighting change detection
+        self.brightness_history = []  # Store last N brightness values
+        self.brightness_history_size = 5  # Track last 5 frames
+        self.brightness_change_threshold = 30  # Significant brightness change (0-255 scale)
         
     def detect_position(self, frame):
         """
@@ -36,6 +42,19 @@ class MotionDetector:
             
             # Convert to grayscale for processing
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            # Calculate current frame brightness
+            current_brightness = np.mean(gray)
+            
+            # Check for sudden brightness changes (lighting changes)
+            if self._is_lighting_change(current_brightness, gray.shape):
+                logger.debug(f"Ignoring detection due to lighting change (brightness: {current_brightness:.1f})")
+                # Update brightness history but return unknown
+                self._update_brightness_history(current_brightness)
+                return 'unknown', 0.0
+            
+            # Update brightness history
+            self._update_brightness_history(current_brightness)
             
             # Apply background subtraction
             fg_mask = self.background_subtractor.apply(gray)
@@ -65,6 +84,11 @@ class MotionDetector:
             # Calculate motion amount
             motion_pixels = np.sum(fg_mask > 0)
             motion_ratio = motion_pixels / (frame.shape[0] * frame.shape[1])
+            
+            # Check if motion covers most of frame (indicates lighting change, not baby movement)
+            if motion_ratio > 0.7:  # More than 70% of frame has motion
+                logger.debug(f"Ignoring detection: motion covers {motion_ratio:.1%} of frame (likely lighting change)")
+                return 'unknown', 0.0
             
             # Get bounding box and analyze shape
             x, y, w, h = cv2.boundingRect(largest_contour)
@@ -110,10 +134,39 @@ class MotionDetector:
         # Uncertain - not enough information
         return 'unknown', 0.3
     
+    def _update_brightness_history(self, brightness):
+        """Update brightness history, keeping only recent values"""
+        self.brightness_history.append(brightness)
+        if len(self.brightness_history) > self.brightness_history_size:
+            self.brightness_history.pop(0)
+    
+    def _is_lighting_change(self, current_brightness, frame_shape):
+        """
+        Detect if there's a sudden full-frame brightness change
+        Returns True if lighting change detected
+        """
+        if len(self.brightness_history) < 2:
+            # Not enough history yet
+            return False
+        
+        # Calculate average of recent brightness (excluding current)
+        recent_avg = np.mean(self.brightness_history[:-1]) if len(self.brightness_history) > 1 else current_brightness
+        
+        # Check for sudden brightness change
+        brightness_change = abs(current_brightness - recent_avg)
+        
+        if brightness_change > self.brightness_change_threshold:
+            # Significant brightness change detected
+            # This likely indicates a light being turned on/off
+            return True
+        
+        return False
+    
     def reset_background(self):
         """Reset background model (useful after long periods of inactivity)"""
         self.background_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=50, detectShadows=True
+            history=100, varThreshold=50, detectShadows=True
         )
         self.frame_count = 0
+        self.brightness_history = []  # Reset brightness tracking
         logger.info("Background model reset")

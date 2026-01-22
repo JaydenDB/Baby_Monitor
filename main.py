@@ -6,6 +6,7 @@ import logging
 import time
 import sys
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from config import (
     CHECK_INTERVAL,
     ALERT_REQUIRE_CONFIDENCE,
@@ -22,12 +23,13 @@ from camera_capture import CameraCapture
 from position_detector import PositionDetector
 from alert_system import AlertSystem
 
-# Configure logging
+# Configure logging with rotation to prevent unbounded log file growth
+# 10MB max file size, keep 5 backup files (total ~50MB max)
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL.upper()),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE),
+        RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=5),
         *([logging.StreamHandler(sys.stdout)] if LOG_TO_CONSOLE else [])
     ]
 )
@@ -134,6 +136,9 @@ class BabyMonitor:
             
             # Retry any queued alerts
             self.alert_system.retry_queued_alerts()
+            
+            # Explicitly delete frame to free memory immediately
+            del frame
             
         except Exception as e:
             logger.error(f"Error in monitoring cycle: {e}", exc_info=True)

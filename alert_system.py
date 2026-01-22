@@ -28,6 +28,7 @@ class AlertSystem:
         self.last_alert_time = {}
         self.alert_queue = []
         self.rate_limit_seconds = ALERT_RATE_LIMIT_MINUTES * 60
+        self.max_queue_size = 10  # Maximum queued alerts to prevent unbounded memory growth
         
         # Initialize Twilio client if credentials are available
         if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
@@ -87,7 +88,11 @@ class AlertSystem:
             
         except TwilioException as e:
             logger.error(f"Twilio API error: {e}")
-            # Queue alert for retry
+            # Queue alert for retry, but limit queue size to prevent memory issues
+            if len(self.alert_queue) >= self.max_queue_size:
+                # Remove oldest alert to make room
+                self.alert_queue.pop(0)
+                logger.warning(f"Alert queue full ({self.max_queue_size}), removing oldest alert")
             self.alert_queue.append({
                 'position': position,
                 'confidence': confidence,
@@ -129,6 +134,12 @@ class AlertSystem:
                     retry_queue.append(alert)
             else:
                 retry_queue.append(alert)
+        
+        # Enforce queue size limit
+        if len(retry_queue) > self.max_queue_size:
+            # Keep only the most recent alerts
+            retry_queue = retry_queue[-self.max_queue_size:]
+            logger.warning(f"Alert queue exceeded limit, keeping only {self.max_queue_size} most recent alerts")
         
         self.alert_queue = retry_queue
     
