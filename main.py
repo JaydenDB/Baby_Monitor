@@ -5,7 +5,6 @@ Continuous monitoring loop with error handling
 import logging
 import time
 import sys
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from config import (
     CHECK_INTERVAL,
@@ -121,19 +120,6 @@ class BabyMonitor:
                     f"obs={result.observability:.2f}, p_unsafe={result.p_unsafe:.2f})"
                 )
                 self.last_position = result.position
-
-            status_text = (
-                f"State: {result.state}\n"
-                f"Position: {result.position}\n"
-                f"Confidence: {result.confidence:.0%}\n"
-                f"Method: {result.method}\n"
-                f"Observability: {result.observability:.0%}\n"
-                f"P(unsafe): {result.p_unsafe:.0%}\n"
-                f"Reason: {result.reason}"
-            )
-
-            # Process caregiver inbound commands (ACK/STATUS) on a polling interval
-            self.alert_system.process_inbound_commands(status_text=status_text)
 
             # Alert logic based on fused state (rate limited + suppressible)
             if result.state == "unsafe_confirmed" and result.position in ALERT_POSITIONS:

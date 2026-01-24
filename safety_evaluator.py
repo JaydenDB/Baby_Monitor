@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Optional, Tuple
+from typing import Deque, Dict, Tuple
 
 from config import (
     ALERT_POSITIONS,
@@ -58,11 +58,6 @@ class SafetyEvaluator:
         self._history: Deque[Dict] = deque()
         self._state: str = "safe"
         self._state_since: float = time.time()
-
-        self._last_result: Optional[SafetyResult] = None
-
-    def get_last_result(self) -> Optional[SafetyResult]:
-        return self._last_result
 
     def update(self, frame) -> SafetyResult:
         now = time.time()
@@ -118,7 +113,7 @@ class SafetyEvaluator:
 
         self._transition_if_needed(state, now)
 
-        result = SafetyResult(
+        return SafetyResult(
             state=self._state,
             position=position,
             confidence=float(confidence),
@@ -127,8 +122,6 @@ class SafetyEvaluator:
             p_unsafe=p_unsafe,
             reason=reason,
         )
-        self._last_result = result
-        return result
 
     def _append_history(
         self,

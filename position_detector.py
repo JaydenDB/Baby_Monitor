@@ -4,7 +4,6 @@ Handles errors gracefully and falls back to motion detection when needed
 """
 import cv2
 import mediapipe as mp
-import numpy as np
 import logging
 from config import (
     MEDIAPIPE_CONFIDENCE_THRESHOLD_HIGH,
@@ -347,11 +346,3 @@ class PositionDetector:
             return POSITION_BACK
         
         return POSITION_UNKNOWN
-    
-    def get_last_method(self):
-        """Get the detection method used in last detection"""
-        return self.last_method
-    
-    def get_last_confidence(self):
-        """Get the confidence from last detection"""
-        return self.last_confidence

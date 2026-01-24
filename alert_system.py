@@ -1,20 +1,15 @@
 """
-SMS alert system using Twilio
+Discord webhook alert system for Baby Monitor
 Handles rate limiting and error recovery
 """
 import logging
 import time
+import requests
 from datetime import datetime
-from twilio.rest import Client
-from twilio.base.exceptions import TwilioException
 from config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_PHONE_NUMBER,
-    PARENT_PHONE_NUMBER,
+    DISCORD_WEBHOOK_URL,
+    DISCORD_USERNAME,
     ALERT_RATE_LIMIT_MINUTES,
-    ENABLE_INBOUND_COMMANDS,
-    TWILIO_INBOUND_POLL_SECONDS,
     ACK_SILENCE_MINUTES,
     POSITION_SIDE,
     POSITION_STOMACH
@@ -24,10 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class AlertSystem:
-    """Handles SMS alerts with rate limiting and error handling"""
+    """Handles Discord webhook alerts with rate limiting and error handling"""
     
     def __init__(self):
-        self.client = None
+        self.webhook_url = DISCORD_WEBHOOK_URL or ""
+        self.username = DISCORD_USERNAME or "Baby Monitor"
         self.last_alert_time = {}
         self.alert_queue = []
         self.rate_limit_seconds = ALERT_RATE_LIMIT_MINUTES * 60
@@ -36,65 +32,75 @@ class AlertSystem:
         # Caregiver acknowledgement / suppression window
         self.suppress_until = 0.0
         self.ack_silence_seconds = float(ACK_SILENCE_MINUTES * 60)
-
-        # Inbound command polling
-        self.enable_inbound_commands = bool(ENABLE_INBOUND_COMMANDS)
-        self.inbound_poll_seconds = float(TWILIO_INBOUND_POLL_SECONDS)
-        self._last_inbound_poll = 0.0
-        self._seen_inbound_sids = []  # keep small to prevent unbounded memory growth
-        self._seen_inbound_sids_max = 50
-        self._last_inbound_date = None  # datetime in UTC (Twilio uses aware datetime)
         
-        # Initialize Twilio client if credentials are available
-        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-            try:
-                self.client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-                logger.info("Twilio client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize Twilio client: {e}")
-                self.client = None
+        # Check if webhook URL is configured
+        if not self.webhook_url:
+            logger.warning("Discord webhook URL not configured. Alerts will not work.")
         else:
-            logger.warning("Twilio credentials not configured. SMS alerts will not work.")
+            logger.info("Discord webhook alert system initialized")
 
-    def _format_message(self, position, confidence, method_used, timestamp=None):
-        """Create the SMS message body for an unsafe position alert."""
-        # Keep timestamp stable for queued retries if provided
-        ts = timestamp or datetime.now()
-        position_text = "side" if position == POSITION_SIDE else "stomach"
-        return (
-            f"⚠️ Baby Monitor Alert\n\n"
-            f"Baby has rolled onto their {position_text}.\n"
-            f"Detection confidence: {confidence:.0%}\n"
-            f"Method: {method_used}\n"
-            f"Time: {ts.strftime('%Y-%m-%d %H:%M:%S')}"
+    def _create_embed(self, title, description, color, fields=None, timestamp=None):
+        """
+        Create a Discord embed dictionary.
+        
+        Args:
+            title: Embed title
+            description: Embed description
+            color: Integer color code (0xRRGGBB format)
+            fields: List of field dicts with 'name' and 'value' keys
+            timestamp: ISO timestamp string or None for current time
+        """
+        embed = {
+            "title": title,
+            "description": description,
+            "color": color,
+            "timestamp": (timestamp or datetime.utcnow().isoformat()) + "Z",
+            "footer": {
+                "text": "Baby Monitor System"
+            }
+        }
+        
+        if fields:
+            embed["fields"] = fields
+        
+        return embed
+
+    def _send_discord_webhook(self, embeds):
+        """
+        Send message to Discord webhook.
+        Raises requests.RequestException on HTTP errors.
+        """
+        if not self.webhook_url:
+            raise requests.RequestException("Discord webhook URL not configured")
+
+        payload = {
+            "username": self.username,
+            "embeds": embeds if isinstance(embeds, list) else [embeds]
+        }
+
+        response = requests.post(
+            self.webhook_url,
+            json=payload,
+            timeout=10
         )
-
-    def _format_degraded_message(self, reason, observability=None, timestamp=None):
-        ts = timestamp or datetime.now()
-        obs_text = f"{observability:.0%}" if isinstance(observability, (int, float)) else "n/a"
-        return (
-            "⚠️ Baby Monitor Warning\n\n"
-            "Monitor cannot reliably confirm safe sleep right now.\n"
-            f"Observability: {obs_text}\n"
-            f"Reason: {reason}\n"
-            f"Time: {ts.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            "Reply STATUS for the current state, or ACK to silence alerts temporarily."
-        )
-
-    def _send_sms(self, message):
-        """Send an SMS via Twilio. Raises TwilioException on Twilio failures."""
-        if not self.client:
-            raise TwilioException("Twilio client not initialized")
-        if not TWILIO_PHONE_NUMBER:
-            raise TwilioException("Twilio phone number not configured")
-        if not PARENT_PHONE_NUMBER:
-            raise TwilioException("Parent phone number not configured")
-
-        self.client.messages.create(
-            body=message,
-            from_=TWILIO_PHONE_NUMBER,
-            to=PARENT_PHONE_NUMBER
-        )
+        
+        # Discord returns 204 No Content on success, 429 on rate limit, 404 on invalid webhook
+        if response.status_code == 204:
+            return True
+        elif response.status_code == 429:
+            # Rate limited - extract retry_after from response if available
+            try:
+                data = response.json()
+                retry_after = data.get("retry_after", 60)
+                logger.warning(f"Discord rate limited. Retry after {retry_after} seconds")
+            except:
+                pass
+            raise requests.RequestException(f"Discord rate limit: HTTP {response.status_code}")
+        elif response.status_code == 404:
+            raise requests.RequestException(f"Discord webhook not found (404). Check webhook URL.")
+        else:
+            response.raise_for_status()
+            return True
 
     def _is_suppressed(self):
         return time.time() < float(self.suppress_until or 0.0)
@@ -107,11 +113,11 @@ class AlertSystem:
     
     def send_alert(self, position, confidence, method_used):
         """
-        Send SMS alert for unsafe position
+        Send Discord alert for unsafe position
         Returns: True if sent successfully, False otherwise
         """
         if self._is_suppressed():
-            logger.info("Alerts are currently suppressed by caregiver acknowledgement")
+            logger.info("Alerts are currently suppressed")
             return False
 
         if position not in [POSITION_SIDE, POSITION_STOMACH]:
@@ -122,20 +128,31 @@ class AlertSystem:
             logger.info(f"Alert rate limited for position: {position}")
             return False
         
-        message = self._format_message(position, confidence, method_used)
+        position_text = "side" if position == POSITION_SIDE else "stomach"
+        
+        embed = self._create_embed(
+            title="⚠️ Baby Monitor Alert",
+            description=f"Baby has rolled onto their {position_text}.",
+            color=0xFF0000,  # Red
+            fields=[
+                {"name": "Position", "value": position_text, "inline": True},
+                {"name": "Confidence", "value": f"{confidence:.0%}", "inline": True},
+                {"name": "Detection Method", "value": method_used, "inline": True},
+                {"name": "Time", "value": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "inline": False}
+            ]
+        )
         
         try:
-            self._send_sms(message)
+            self._send_discord_webhook(embed)
             
             # Update last alert time
             self.last_alert_time[position] = time.time()
             
-            position_text = "side" if position == POSITION_SIDE else "stomach"
             logger.info(f"Alert sent successfully for {position_text} position")
             return True
             
-        except TwilioException as e:
-            logger.error(f"Twilio API error: {e}")
+        except requests.RequestException as e:
+            logger.error(f"Discord webhook error: {e}")
             # Queue alert for retry, but limit queue size to prevent memory issues
             if len(self.alert_queue) >= self.max_queue_size:
                 # Remove oldest alert to make room
@@ -156,11 +173,11 @@ class AlertSystem:
 
     def send_degraded_alert(self, reason, observability=None):
         """
-        Send an SMS alert when monitoring is degraded (can't confirm safe sleep).
+        Send a Discord alert when monitoring is degraded (can't confirm safe sleep).
         Uses its own rate limit key to avoid spamming.
         """
         if self._is_suppressed():
-            logger.info("Degraded alert suppressed by caregiver acknowledgement")
+            logger.info("Degraded alert suppressed")
             return False
 
         key = "degraded"
@@ -168,111 +185,31 @@ class AlertSystem:
             logger.info("Degraded alert rate limited")
             return False
 
-        message = self._format_degraded_message(reason=reason, observability=observability)
+        obs_text = f"{observability:.0%}" if isinstance(observability, (int, float)) else "n/a"
+        
+        embed = self._create_embed(
+            title="⚠️ Baby Monitor Warning",
+            description="Monitor cannot reliably confirm safe sleep right now.",
+            color=0xFF8800,  # Orange
+            fields=[
+                {"name": "Observability", "value": obs_text, "inline": True},
+                {"name": "Reason", "value": reason, "inline": False},
+                {"name": "Time", "value": datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "inline": False}
+            ]
+        )
+        
         try:
-            self._send_sms(message)
+            self._send_discord_webhook(embed)
             self.last_alert_time[key] = time.time()
             logger.info("Degraded monitoring alert sent successfully")
             return True
-        except TwilioException as e:
-            logger.error(f"Twilio API error sending degraded alert: {e}")
+        except requests.RequestException as e:
+            logger.error(f"Discord webhook error sending degraded alert: {e}")
             return False
         except Exception as e:
             logger.error(f"Unexpected error sending degraded alert: {e}")
             return False
 
-    def send_status_message(self, status_text):
-        """Send an informational status message to the parent phone number."""
-        if not self.client:
-            logger.warning("Cannot send status: Twilio client not initialized")
-            return False
-        if not status_text:
-            status_text = "Baby Monitor status unavailable."
-
-        message = f"Baby Monitor Status:\n\n{status_text}"
-        try:
-            self._send_sms(message)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send status message: {e}")
-            return False
-
-    def process_inbound_commands(self, status_text=None):
-        """
-        Poll Twilio for inbound SMS commands from the parent number.
-
-        Supported:
-          - ACK: suppress alerts for ACK_SILENCE_MINUTES
-          - STATUS: respond with the current status_text (provided by caller)
-          - HELP: basic usage
-        """
-        if not self.enable_inbound_commands:
-            return
-        if not self.client or not TWILIO_PHONE_NUMBER or not PARENT_PHONE_NUMBER:
-            return
-
-        now = time.time()
-        if now - self._last_inbound_poll < self.inbound_poll_seconds:
-            return
-        self._last_inbound_poll = now
-
-        try:
-            # Fetch recent messages to our Twilio number from the parent.
-            msgs = self.client.messages.list(
-                to=TWILIO_PHONE_NUMBER,
-                from_=PARENT_PHONE_NUMBER,
-                limit=20,
-            )
-        except Exception as e:
-            logger.error(f"Failed to poll inbound SMS: {e}")
-            return
-
-        # Process in chronological order.
-        for msg in reversed(msgs):
-            try:
-                if getattr(msg, "direction", "") != "inbound":
-                    continue
-
-                sid = getattr(msg, "sid", None)
-                if sid and sid in self._seen_inbound_sids:
-                    continue
-
-                date_sent = getattr(msg, "date_sent", None)
-                if self._last_inbound_date is not None and date_sent is not None and date_sent <= self._last_inbound_date:
-                    continue
-
-                body = (getattr(msg, "body", "") or "").strip()
-                cmd = body.upper()
-
-                if cmd == "ACK":
-                    self.suppress_alerts()
-                    until = datetime.fromtimestamp(self.suppress_until).strftime("%Y-%m-%d %H:%M:%S")
-                    self.send_status_message(
-                        f"ACK received. Alerts silenced until {until}.\n\nReply STATUS for current state."
-                    )
-
-                elif cmd == "STATUS":
-                    self.send_status_message(status_text or "Status unavailable.")
-
-                elif cmd in ("HELP", "?"):
-                    self.send_status_message("Commands: STATUS, ACK, HELP")
-
-                else:
-                    # Ignore unknown commands to avoid noisy loops.
-                    continue
-
-                # Mark processed
-                if sid:
-                    self._seen_inbound_sids.append(sid)
-                    if len(self._seen_inbound_sids) > self._seen_inbound_sids_max:
-                        self._seen_inbound_sids = self._seen_inbound_sids[-self._seen_inbound_sids_max :]
-
-                if date_sent is not None:
-                    self._last_inbound_date = date_sent
-
-            except Exception as e:
-                logger.error(f"Error processing inbound SMS command: {e}")
-    
     def _can_send_alert(self, position):
         """
         Check if alert can be sent (rate limiting)
@@ -286,7 +223,7 @@ class AlertSystem:
     
     def retry_queued_alerts(self):
         """Retry any queued alerts that failed to send"""
-        if not self.alert_queue or not self.client:
+        if not self.alert_queue or not self.webhook_url:
             return
         
         # Work on a snapshot and rebuild the queue to avoid mutating
@@ -305,18 +242,24 @@ class AlertSystem:
             else:
                 # Send directly without re-queueing inside send_alert()
                 try:
-                    message = self._format_message(
-                        alert['position'],
-                        alert['confidence'],
-                        alert['method_used'],
-                        # preserve original event time in message
-                        timestamp=datetime.fromtimestamp(alert['timestamp'])
+                    position_text = "side" if alert['position'] == POSITION_SIDE else "stomach"
+                    embed = self._create_embed(
+                        title="⚠️ Baby Monitor Alert (Retry)",
+                        description=f"Baby has rolled onto their {position_text}.",
+                        color=0xFF0000,  # Red
+                        fields=[
+                            {"name": "Position", "value": position_text, "inline": True},
+                            {"name": "Confidence", "value": f"{alert['confidence']:.0%}", "inline": True},
+                            {"name": "Detection Method", "value": alert['method_used'], "inline": True},
+                            {"name": "Time", "value": datetime.fromtimestamp(alert['timestamp']).strftime('%Y-%m-%d %H:%M:%S'), "inline": False}
+                        ],
+                        timestamp=datetime.fromtimestamp(alert['timestamp']).isoformat() + "Z"
                     )
-                    self._send_sms(message)
+                    self._send_discord_webhook(embed)
                     self.last_alert_time[alert['position']] = time.time()
                     logger.info("Successfully sent queued alert")
-                except TwilioException as e:
-                    logger.error(f"Twilio API error while retrying queued alert: {e}")
+                except requests.RequestException as e:
+                    logger.error(f"Discord webhook error while retrying queued alert: {e}")
                     retry_queue.append(alert)
                 except Exception as e:
                     logger.error(f"Unexpected error retrying queued alert: {e}")
@@ -332,17 +275,22 @@ class AlertSystem:
     
     def test_connection(self):
         """
-        Test Twilio connection
+        Test Discord webhook connection
         Returns: True if connection works, False otherwise
         """
-        if not self.client:
+        if not self.webhook_url:
             return False
         
         try:
-            # Try to fetch account info
-            account = self.client.api.accounts(TWILIO_ACCOUNT_SID).fetch()
-            logger.info(f"Twilio connection test successful. Account: {account.friendly_name}")
+            # Send a test message
+            embed = self._create_embed(
+                title="Baby Monitor Test",
+                description="Connection test successful.",
+                color=0x00FF00  # Green
+            )
+            self._send_discord_webhook(embed)
+            logger.info("Discord webhook connection test successful")
             return True
         except Exception as e:
-            logger.error(f"Twilio connection test failed: {e}")
+            logger.error(f"Discord webhook connection test failed: {e}")
             return False

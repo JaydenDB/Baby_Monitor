@@ -5,7 +5,7 @@ Uses MediaPipe Face Detection to identify face visibility for position classific
 import cv2
 import mediapipe as mp
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict
 
 from config import ENABLE_FACE_DETECTION, FACE_DETECTION_MIN_CONFIDENCE
 

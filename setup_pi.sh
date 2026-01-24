@@ -67,7 +67,7 @@ if [ ! -f .env ]; then
     echo "Creating .env file from template..."
     cp .env.example .env
     echo ""
-    echo "⚠️  IMPORTANT: Edit .env file and add your Twilio credentials!"
+    echo "⚠️  IMPORTANT: Edit .env file and add your Discord webhook URL!"
     echo "   nano .env"
 fi
 
@@ -77,7 +77,7 @@ echo "Setup complete!"
 echo "=========================================="
 echo ""
 echo "Next steps:"
-echo "1. Edit .env file with your Twilio credentials:"
+echo "1. Edit .env file with your Discord webhook URL:"
 echo "   nano .env"
 echo ""
 echo "2. Test the program:"

@@ -1,6 +1,6 @@
 # Baby Monitor for Raspberry Pi
 
-A production-ready Python-based baby monitor that uses webcam input, advanced hybrid detection methods (MediaPipe pose + motion detection + face detection), temporal fusion for stability, and SMS alerts when the baby rolls onto their side or stomach.
+A production-ready Python-based baby monitor that uses webcam input, advanced hybrid detection methods (MediaPipe pose + motion detection + face detection), temporal fusion for stability, and free Discord webhook alerts when the baby rolls onto their side or stomach.
 
 ## Features
 
@@ -11,8 +11,8 @@ A production-ready Python-based baby monitor that uses webcam input, advanced hy
 - **Works with Babies**: Motion detection and face detection handle cases where MediaPipe struggles
 - **Robust Error Handling**: Never crashes, handles all error scenarios gracefully
 - **Confidence-Based Alerts**: Only alerts when detection is confident and sustained (prevents false alarms)
-- **SMS Notifications**: Twilio integration for instant alerts with caregiver acknowledgment
-- **SMS Commands**: Reply ACK to silence alerts, STATUS for current state
+- **Discord Notifications**: Free Discord webhook integration for instant remote alerts
+- **Rich Formatting**: Discord embeds provide clear, structured alert messages
 - **Production Ready**: Comprehensive logging, error recovery, and monitoring
 
 ## Important Note: MediaPipe and Babies
@@ -80,11 +80,15 @@ The system is designed to work reliably even when MediaPipe struggles with baby 
 
 ## Configuration
 
-### 1. Twilio Setup
+### 1. Discord Webhook Setup
 
-1. Create a Twilio account at https://www.twilio.com/
-2. Get your Account SID and Auth Token from the Twilio Console
-3. Get a Twilio phone number (or use trial number for testing)
+1. Create a Discord account (free) at https://discord.com/ if you don't have one
+2. Create a Discord server (or use an existing one)
+3. Go to Server Settings → Integrations → Webhooks
+4. Click "New Webhook"
+5. Give it a name (e.g., "Baby Monitor")
+6. Choose which channel to send alerts to
+7. Click "Copy Webhook URL" - you'll need this for configuration
 
 ### 2. Environment Variables
 
@@ -98,13 +102,13 @@ The system is designed to work reliably even when MediaPipe struggles with baby 
    nano .env
    ```
 
-3. Add your Twilio credentials:
+3. Add your Discord webhook URL:
    ```
-   TWILIO_ACCOUNT_SID=your_account_sid
-   TWILIO_AUTH_TOKEN=your_auth_token
-   TWILIO_PHONE_NUMBER=+1234567890
-   PARENT_PHONE_NUMBER=+1234567890
+   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your_webhook_id/your_webhook_token
+   DISCORD_USERNAME=Baby Monitor
    ```
+
+**Important**: Keep your webhook URL secret! Anyone with the URL can send messages to your Discord channel.
 
 ### 3. Camera Configuration
 
@@ -136,9 +140,12 @@ Edit `config.py` or `.env` to adjust:
 - `CONSERVATIVE_DEFAULT_ENABLED`: Escalate when position unknown for extended period (default: True)
 - `UNKNOWN_POSITION_ALARM_SECONDS`: Seconds of unknown position before escalation (default: 30)
 
-**SMS Commands:**
-- `ENABLE_INBOUND_COMMANDS`: Enable SMS command polling (default: True)
-- `ACK_SILENCE_MINUTES`: Minutes to silence alerts after ACK command (default: 10)
+**Discord Settings:**
+- `DISCORD_WEBHOOK_URL`: Your Discord webhook URL (required)
+- `DISCORD_USERNAME`: Username for Discord messages (default: "Baby Monitor")
+
+**Alert Suppression:**
+- `ACK_SILENCE_MINUTES`: Minutes to silence alerts (default: 10, can be triggered programmatically)
 
 **Camera Settings:**
 - Camera resolution and FPS
@@ -208,11 +215,11 @@ python3 main.py
    - Prevents false alarms from single-frame noise
    - Escalates to "degraded" state if observability is too low
 4. **Alert System**: 
-   - Sends SMS when state reaches "unsafe_confirmed"
+   - Sends Discord webhook messages when state reaches "unsafe_confirmed"
    - Sends separate "degraded monitoring" alerts when system can't confirm safe sleep
-   - Rate limited to prevent spam
-   - Supports caregiver acknowledgment (reply ACK to silence temporarily)
-   - Supports status queries (reply STATUS for current state)
+   - Rate limited to prevent spam (Discord allows 30 requests/minute per webhook)
+   - Rich embed formatting for better readability
+   - Alerts appear instantly on Discord mobile/desktop apps
 
 ## Detection Methods
 
@@ -251,11 +258,13 @@ python3 main.py
 - Check permissions: `groups` (should include `video`)
 - Try different camera index in config (0, 1, 2, etc.)
 
-### SMS Not Sending
-- Verify Twilio credentials in `.env` file
-- Test Twilio connection: Check logs for errors
-- Verify phone numbers are in E.164 format (+1234567890)
-- Check Twilio account balance
+### Discord Alerts Not Sending
+- Verify `DISCORD_WEBHOOK_URL` is set correctly in `.env` file
+- Test Discord webhook: Check logs for connection test results
+- Verify webhook URL is valid (should start with `https://discord.com/api/webhooks/`)
+- Check Discord server/channel permissions
+- Ensure internet connection is working
+- Check for rate limiting (Discord allows 30 requests/minute per webhook)
 
 ### False Alarms
 - Increase `ALERT_CONFIDENCE` threshold in config
@@ -265,7 +274,6 @@ python3 main.py
 - Check logs to see which detection method is being used
 - Adjust `MOTION_THRESHOLD` if motion detection is too sensitive
 - Disable `CONSERVATIVE_DEFAULT_ENABLED` if unknown position alarms are too frequent
-- Reply `ACK` to SMS alerts to silence temporarily
 
 ### Missed Alerts
 - Decrease `UNSAFE_CONFIRM_P_THRESHOLD` (default: 0.65) to catch weaker signals
@@ -287,7 +295,7 @@ Logs are written to `baby_monitor.log` and optionally to console.
 Log levels:
 - `INFO`: Normal operation, position changes, state transitions, safety evaluator decisions
 - `WARNING`: Alerts sent, degraded monitoring warnings
-- `ERROR`: Camera errors, SMS failures, exceptions
+- `ERROR`: Camera errors, Discord webhook failures, exceptions
 - `DEBUG`: Detailed detection method decisions (enable with `LOG_LEVEL=DEBUG`)
 
 Key log messages:
@@ -320,7 +328,7 @@ This project is provided as-is for personal use.
 For issues or questions:
 1. Check the logs: `tail -f baby_monitor.log`
 2. Review this README
-3. Check Twilio and camera connections
+3. Check Discord webhook and camera connections
 4. Verify all configuration settings
 
 ## GitHub Deployment

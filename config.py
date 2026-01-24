@@ -46,16 +46,12 @@ OBSERVABILITY_THRESHOLD = float(os.getenv('OBSERVABILITY_THRESHOLD', '0.30'))
 OBSERVABILITY_DEGRADED_THRESHOLD = float(os.getenv('OBSERVABILITY_DEGRADED_THRESHOLD', '0.20'))
 OBSERVABILITY_DEGRADED_SECONDS = float(os.getenv('OBSERVABILITY_DEGRADED_SECONDS', '60'))
 
-# Inbound SMS commands (polling) for caregiver acknowledgement
-ENABLE_INBOUND_COMMANDS = os.getenv('ENABLE_INBOUND_COMMANDS', 'True').lower() == 'true'
-TWILIO_INBOUND_POLL_SECONDS = float(os.getenv('TWILIO_INBOUND_POLL_SECONDS', '10'))
+# Alert Suppression
 ACK_SILENCE_MINUTES = int(os.getenv('ACK_SILENCE_MINUTES', '10'))
 
-# Twilio SMS Settings
-TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID', '')
-TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN', '')
-TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER', '')
-PARENT_PHONE_NUMBER = os.getenv('PARENT_PHONE_NUMBER', '')
+# Discord Webhook Settings
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
+DISCORD_USERNAME = os.getenv('DISCORD_USERNAME', 'Baby Monitor')
 
 # Logging Settings
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
