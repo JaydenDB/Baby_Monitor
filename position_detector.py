@@ -336,10 +336,10 @@ class PositionDetector:
         if lateral_offset > body_horizontal * 0.3:
             return POSITION_SIDE
         
-        # Stomach position: body horizontal, nose below shoulders (face down)
-        if body_horizontal > body_vertical * 1.5:
-            if nose.y > hip_center_y:  # Nose below hips (face down)
-                return POSITION_STOMACH
+        # Stomach position: body horizontal, nose further from camera than shoulders (face down)
+        shoulder_center_z = (left_shoulder.z + right_shoulder.z) / 2
+        if nose.z > shoulder_center_z:  # Nose "deeper" than shoulders (face down)
+            return POSITION_STOMACH
         
         # Default to back if horizontal
         if body_horizontal > body_vertical:
